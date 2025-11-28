@@ -93,6 +93,7 @@ nvm exec 22.14.0 npx semantic-release --dry-run
 ## 构建与部署
 
 - 项目启用了 `next.config.mjs` 中的静态导出（`output: "export"`）
+- 静态导出会禁用 Partial Pre-rendering 的流式能力；如需体验 PPR，请改为服务器模式（移除/注释 `output: "export"`，使用 `next dev`/`next start` 部署），并按需调整 basePath/assetPrefix
 - 默认开发模式 **不启用** `basePath`，发布到 GitHub Pages 时自动使用 `/next-modern-starter`
 - 如需在本地模拟相同路径，可设置环境变量：
 
