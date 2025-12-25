@@ -15,6 +15,11 @@ pnpm dev
 
 - `-y` / `--yes`：跳过交互式提问，直接使用默认描述。
 - `--semantic-release` / `--no-semantic-release`：强制包含或跳过 semantic-release 相关配置与依赖（默认包含，也可在交互中选择；跳过时会删除 `release.yml`、`.releaserc.json`、`CHANGELOG.md` 以及相关依赖并移除预置锁文件）。
+- `--template <path|git-url>`：使用本地路径或 Git 仓库作为模板来源（Git 仓库会被浅克隆后使用）。
+- `--template-ref <ref>`：指定模板 Git 仓库的分支/tag。
+- `--ci` / `--no-ci`：是否包含 `.github/workflows` CI 配置（默认包含）。
+- `--preview-tools` / `--no-preview-tools`：是否包含 nginx 预览脚本与相关 npm scripts（默认包含）。
+- `--verify` / `--no-verify`：生成完成后是否运行基础校验（默认开启）。
 - 如果保留 semantic-release 相关文件，GitHub Actions `release` 工作流需要仓库 Secret `RELEASE_GITHUB_TOKEN`（具备 `repo` 权限的 PAT）；也可以自行改成使用内置的 `GITHUB_TOKEN`。
 
 ## 模板特性

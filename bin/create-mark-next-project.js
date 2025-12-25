@@ -4,6 +4,8 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const readline = require('readline');
+const os = require('os');
+const { execSync } = require('child_process');
 
 const TEMPLATE_DIR = path.join(__dirname, '..', 'templates', 'base');
 const ROOT_PACKAGE_PATH = path.join(__dirname, '..', 'package.json');
@@ -35,10 +37,16 @@ function parseArgs(rawArgs) {
   const options = {
     yes: false,
     help: false,
-    semanticRelease: null
+    semanticRelease: null,
+    template: null,
+    templateRef: null,
+    ci: null,
+    previewTools: null,
+    verify: null
   };
 
-  for (const arg of rawArgs) {
+  for (let i = 0; i < rawArgs.length; i += 1) {
+    const arg = rawArgs[i];
     if (arg === '--yes' || arg === '-y') {
       options.yes = true;
       continue;
@@ -53,6 +61,48 @@ function parseArgs(rawArgs) {
     }
     if (arg === '--no-semantic-release') {
       options.semanticRelease = false;
+      continue;
+    }
+    if (arg === '--template') {
+      options.template = rawArgs[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--template=')) {
+      options.template = arg.split('=')[1];
+      continue;
+    }
+    if (arg === '--template-ref') {
+      options.templateRef = rawArgs[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--template-ref=')) {
+      options.templateRef = arg.split('=')[1];
+      continue;
+    }
+    if (arg === '--ci') {
+      options.ci = true;
+      continue;
+    }
+    if (arg === '--no-ci') {
+      options.ci = false;
+      continue;
+    }
+    if (arg === '--preview-tools') {
+      options.previewTools = true;
+      continue;
+    }
+    if (arg === '--no-preview-tools') {
+      options.previewTools = false;
+      continue;
+    }
+    if (arg === '--verify') {
+      options.verify = true;
+      continue;
+    }
+    if (arg === '--no-verify') {
+      options.verify = false;
       continue;
     }
     if (arg.startsWith('-')) {
@@ -114,11 +164,55 @@ function isDirectoryEmpty(dirPath) {
   return files.length === 0;
 }
 
-function copyTemplate(targetDir) {
+function removeDirectoryIfExists(dirPath) {
+  if (fs.existsSync(dirPath)) {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  }
+}
+
+function isLikelyGitUrl(input) {
+  return /^(https?:\/\/|git@|ssh:\/\/)/i.test(input);
+}
+
+function resolveTemplateSource(templateOption, templateRef) {
+  if (!templateOption) {
+    return { sourcePath: TEMPLATE_DIR, cleanupPath: null };
+  }
+
+  const resolvedLocal = path.resolve(templateOption);
+  if (fs.existsSync(resolvedLocal)) {
+    return { sourcePath: resolvedLocal, cleanupPath: null };
+  }
+
+  if (!isLikelyGitUrl(templateOption)) {
+    throw new Error(`Template path "${templateOption}" does not exist and is not a git URL.`);
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmnp-template-'));
+  const args = ['clone', '--depth', '1'];
+  if (templateRef) {
+    args.push('-b', templateRef);
+  }
+  args.push(templateOption, tempDir);
+
+  try {
+    execSync(`git ${args.join(' ')}`, { stdio: 'inherit' });
+  } catch (err) {
+    removeDirectoryIfExists(tempDir);
+    throw new Error(`Failed to clone template from ${templateOption}: ${err.message}`);
+  }
+
+  return { sourcePath: tempDir, cleanupPath: tempDir };
+}
+
+function copyTemplate(sourceDir, targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
-  fs.cpSync(TEMPLATE_DIR, targetDir, {
+  fs.cpSync(sourceDir, targetDir, {
     recursive: true
   });
+
+  // Ensure no git metadata leaks into generated project.
+  removeDirectoryIfExists(path.join(targetDir, '.git'));
 }
 
 function removeSemanticReleaseArtifacts(targetDir) {
@@ -167,6 +261,21 @@ function stripDeps(pkg, dependencyGroups, targets) {
   return removed;
 }
 
+function stripScripts(pkg, scripts) {
+  if (!pkg.scripts) return false;
+  let removed = false;
+  for (const name of scripts) {
+    if (pkg.scripts[name]) {
+      delete pkg.scripts[name];
+      removed = true;
+    }
+  }
+  if (Object.keys(pkg.scripts).length === 0) {
+    delete pkg.scripts;
+  }
+  return removed;
+}
+
 async function updatePackageJson(targetDir, packageName, description, author, options = {}) {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) {
@@ -186,6 +295,9 @@ async function updatePackageJson(targetDir, packageName, description, author, op
   let removedSemanticReleaseDeps = false;
   if (options.removeSemanticReleaseDeps) {
     removedSemanticReleaseDeps = stripDeps(pkg, ['devDependencies', 'dependencies'], SEMANTIC_RELEASE_PACKAGES);
+  }
+  if (options.removePreviewScripts) {
+    stripScripts(pkg, ['preview', 'preview:stop', 'preview:verify', 'preview:check']);
   }
 
   await fsp.writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
@@ -306,6 +418,55 @@ function updateProjectBasePath(targetDir, projectSlug) {
   }
 }
 
+function removeCIAssets(targetDir) {
+  const workflowsDir = path.join(targetDir, '.github', 'workflows');
+  removeDirectoryIfExists(workflowsDir);
+  const githubDir = path.join(targetDir, '.github');
+  if (fs.existsSync(githubDir) && isDirectoryEmpty(githubDir)) {
+    fs.rmdirSync(githubDir);
+  }
+}
+
+function removePreviewTools(targetDir) {
+  const toolsDir = path.join(targetDir, 'tools');
+  removeDirectoryIfExists(toolsDir);
+}
+
+function runPostGenerationChecks(targetDir, expectedSlug) {
+  let passed = true;
+  const pkgPath = path.join(targetDir, 'package.json');
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    if (pkg.name !== expectedSlug) {
+      passed = false;
+      console.warn(`⚠️  package.json name mismatch: expected "${expectedSlug}", got "${pkg.name}".`);
+    }
+  } catch (err) {
+    passed = false;
+    console.warn('⚠️  Failed to read package.json during verification.', err.message);
+  }
+
+  const readmePath = path.join(targetDir, 'README.md');
+  if (fs.existsSync(readmePath)) {
+    const headingLine = fs.readFileSync(readmePath, 'utf8').split('\n')[0];
+    if (!headingLine.includes(expectedSlug)) {
+      passed = false;
+      console.warn('⚠️  README heading does not reflect the project name.');
+    }
+  }
+
+  const nextConfigPath = path.join(targetDir, 'next.config.mjs');
+  if (fs.existsSync(nextConfigPath)) {
+    const content = fs.readFileSync(nextConfigPath, 'utf8');
+    if (!content.includes(`'${expectedSlug}'`)) {
+      passed = false;
+      console.warn('⚠️  next.config.mjs repoName fallback was not updated.');
+    }
+  }
+
+  return passed;
+}
+
 async function main() {
   const { targetDir: cliArgTargetDir, options } = parseArgs(process.argv.slice(2));
 
@@ -318,6 +479,11 @@ async function main() {
     console.log('  -h, --help   Show this help message');
     console.log('  --semantic-release        Force enable semantic-release assets');
     console.log('  --no-semantic-release     Skip semantic-release assets');
+    console.log('  --template <path|git-url> Use a local folder or git repo as template source');
+    console.log('  --template-ref <ref>      When using git template, checkout this branch/tag');
+    console.log('  --ci / --no-ci            Include or skip GitHub Actions workflows');
+    console.log('  --preview-tools / --no-preview-tools  Include or skip nginx preview tools/scripts');
+    console.log('  --verify / --no-verify    Run post-generation sanity checks (default on)');
     console.log();
     console.log('Notes:');
     console.log('  - Install pnpm before running project scripts.');
@@ -363,6 +529,9 @@ async function main() {
   let description = 'A Next.js project built with create-mark-next-project';
   let author = '';
   let useSemanticRelease = options.semanticRelease ?? true;
+  let includeCI = options.ci ?? true;
+  let includePreviewTools = options.previewTools ?? true;
+  let runVerify = options.verify ?? true;
 
   if (!options.yes) {
     description = await ask('Project description', description);
@@ -370,21 +539,35 @@ async function main() {
     if (options.semanticRelease === null) {
       useSemanticRelease = await askYesNo('Include semantic-release workflows', true);
     }
+    if (options.ci === null) {
+      includeCI = await askYesNo('Include GitHub Actions workflows', true);
+    }
+    if (options.previewTools === null) {
+      includePreviewTools = await askYesNo('Include nginx preview tools/scripts', true);
+    }
+    if (options.verify === null) {
+      runVerify = await askYesNo('Run post-generation verification', true);
+    }
   }
 
   if (options.yes && options.semanticRelease === null) {
     useSemanticRelease = true;
   }
 
+  const { sourcePath, cleanupPath } = resolveTemplateSource(options.template, options.templateRef);
+
   console.log('⏳ Creating project...');
-  copyTemplate(targetDirectory);
+  copyTemplate(sourcePath, targetDirectory);
 
   const { removedSemanticReleaseDeps } = await updatePackageJson(
     targetDirectory,
     inferredPackageName,
     description,
     author,
-    { removeSemanticReleaseDeps: !useSemanticRelease }
+    {
+      removeSemanticReleaseDeps: !useSemanticRelease,
+      removePreviewScripts: !includePreviewTools
+    }
   );
   await updateReadmeHeading(targetDirectory, projectDirName);
   updateProjectBasePath(targetDirectory, inferredPackageName);
@@ -395,6 +578,27 @@ async function main() {
     removeSemanticReleaseDocs(targetDirectory);
   } else {
     console.log('ℹ️  Release workflow expects RELEASE_GITHUB_TOKEN (repo PAT) or edit workflow to use GITHUB_TOKEN.');
+  }
+  if (!includeCI) {
+    removeCIAssets(targetDirectory);
+    console.log('ℹ️  CI workflows removed as requested.');
+  }
+  if (!includePreviewTools) {
+    removePreviewTools(targetDirectory);
+    console.log('ℹ️  Preview tools removed as requested.');
+  }
+
+  if (cleanupPath) {
+    removeDirectoryIfExists(cleanupPath);
+  }
+
+  if (runVerify) {
+    const ok = runPostGenerationChecks(targetDirectory, inferredPackageName);
+    if (ok) {
+      console.log('✅ Verification passed.');
+    } else {
+      console.log('⚠️  Verification found potential mismatches. Please review warnings above.');
+    }
   }
 
   console.log('✅ Project scaffold created successfully!');
