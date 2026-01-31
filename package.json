@@ -1,7 +1,7 @@
 {
   "name": "create-mark-next-project",
   "version": "0.1.0",
-  "description": "Create a Next.js 16 + React 19 project with Tailwind, linting, and semantic-release tooling.",
+  "description": "Create a Next.js 16 + React 19 project with Tailwind, linting, CI, preview tools, and semantic-release out of the box.",
   "bin": {
     "create-mark-next-project": "bin/create-mark-next-project.js"
   },
@@ -21,12 +21,26 @@
     "scaffold",
     "cli",
     "starter",
-    "template"
+    "template",
+    "typescript",
+    "tailwind",
+    "app-router"
   ],
   "author": "create-mark-next-project contributors",
   "license": "MIT",
   "engines": {
     "node": ">=18.18.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MARKX97/create-mark-next-project.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MARKX97/create-mark-next-project/issues"
+  },
+  "homepage": "https://github.com/MARKX97/create-mark-next-project#readme",
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {}
 }

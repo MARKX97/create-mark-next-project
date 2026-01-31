@@ -42,7 +42,8 @@ function parseArgs(rawArgs) {
     templateRef: null,
     ci: null,
     previewTools: null,
-    verify: null
+    verify: null,
+    packageManager: null
   };
 
   for (let i = 0; i < rawArgs.length; i += 1) {
@@ -105,6 +106,18 @@ function parseArgs(rawArgs) {
       options.verify = false;
       continue;
     }
+    if (arg === '--use-pnpm') {
+      options.packageManager = 'pnpm';
+      continue;
+    }
+    if (arg === '--use-npm') {
+      options.packageManager = 'npm';
+      continue;
+    }
+    if (arg === '--use-yarn') {
+      options.packageManager = 'yarn';
+      continue;
+    }
     if (arg.startsWith('-')) {
       console.warn(`Unknown option: ${arg}`);
       continue;
@@ -162,6 +175,15 @@ function toValidPackageName(name) {
 function isDirectoryEmpty(dirPath) {
   const files = fs.readdirSync(dirPath);
   return files.length === 0;
+}
+
+function isCommandAvailable(cmd) {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function removeDirectoryIfExists(dirPath) {
@@ -326,6 +348,15 @@ function maybeRemoveLockfile(targetDir, shouldRemove) {
   }
 }
 
+function removePnpmLockIfDifferentPM(targetDir, packageManager) {
+  if (packageManager === 'pnpm') return;
+  const lockPath = path.join(targetDir, 'pnpm-lock.yaml');
+  if (fs.existsSync(lockPath)) {
+    fs.rmSync(lockPath);
+    console.log(`ℹ️  Removed pnpm-lock.yaml because package manager is ${packageManager}.`);
+  }
+}
+
 function replaceInFile(filePath, replacements) {
   if (!fs.existsSync(filePath)) {
     return;
@@ -467,6 +498,34 @@ function runPostGenerationChecks(targetDir, expectedSlug) {
   return passed;
 }
 
+function assertNodeVersion(minVersion = '18.18.0') {
+  const current = process.versions.node;
+  const toParts = v => v.split('.').map(n => parseInt(n, 10));
+  const [cMaj, cMin, cPatch] = toParts(current);
+  const [mMaj, mMin, mPatch] = toParts(minVersion);
+  const isOk =
+    cMaj > mMaj ||
+    (cMaj === mMaj && cMin > mMin) ||
+    (cMaj === mMaj && cMin === mMin && cPatch >= mPatch);
+  if (!isOk) {
+    console.error(`✖ Node ${minVersion}+ required. Detected ${current}. Please upgrade Node to continue.`);
+    process.exit(1);
+  }
+}
+
+function selectPackageManager(optionPm) {
+  if (optionPm) {
+    if (!isCommandAvailable(optionPm)) {
+      console.warn(`⚠️  ${optionPm} not found on PATH. Falling back to auto-detection.`);
+    } else {
+      return optionPm;
+    }
+  }
+  if (isCommandAvailable('pnpm')) return 'pnpm';
+  if (isCommandAvailable('yarn')) return 'yarn';
+  return 'npm';
+}
+
 async function main() {
   const { targetDir: cliArgTargetDir, options } = parseArgs(process.argv.slice(2));
 
@@ -484,12 +543,15 @@ async function main() {
     console.log('  --ci / --no-ci            Include or skip GitHub Actions workflows');
     console.log('  --preview-tools / --no-preview-tools  Include or skip nginx preview tools/scripts');
     console.log('  --verify / --no-verify    Run post-generation sanity checks (default on)');
+    console.log('  --use-pnpm | --use-npm | --use-yarn  Choose package manager (auto-detect if omitted)');
     console.log();
     console.log('Notes:');
     console.log('  - Install pnpm before running project scripts.');
     console.log('  - Release workflow uses RELEASE_GITHUB_TOKEN (repo PAT) when semantic-release is enabled.');
     process.exit(0);
   }
+
+  assertNodeVersion();
 
   let projectDirName = cliArgTargetDir;
   if (!projectDirName) {
@@ -532,6 +594,7 @@ async function main() {
   let includeCI = options.ci ?? true;
   let includePreviewTools = options.previewTools ?? true;
   let runVerify = options.verify ?? true;
+  const packageManager = selectPackageManager(options.packageManager);
 
   if (!options.yes) {
     description = await ask('Project description', description);
@@ -592,6 +655,8 @@ async function main() {
     removeDirectoryIfExists(cleanupPath);
   }
 
+  removePnpmLockIfDifferentPM(targetDirectory, packageManager);
+
   if (runVerify) {
     const ok = runPostGenerationChecks(targetDirectory, inferredPackageName);
     if (ok) {
@@ -605,15 +670,16 @@ async function main() {
   console.log();
   console.log('Next steps:');
   console.log(`  1. cd ${projectDirName}`);
-  console.log('  2. pnpm install');
-  console.log('  3. pnpm dev');
+  console.log(`  2. ${packageManager} ${packageManager === 'pnpm' ? 'install' : 'install'}`);
+  console.log(`  3. ${packageManager} ${packageManager === 'npm' ? 'run ' : ''}dev`);
   console.log();
-  console.log('Requirements: pnpm installed; configure RELEASE_GITHUB_TOKEN if you keep semantic-release.');
+  console.log(`Requirements: Node >=18.18.0; ${packageManager} installed; configure RELEASE_GITHUB_TOKEN if you keep semantic-release.`);
   console.log();
   console.log('Additional commands:');
-  console.log('  pnpm lint        # Run ESLint');
-  console.log('  pnpm lint:style  # Run Stylelint');
-  console.log('  pnpm format      # Format files with Prettier');
+  const runner = packageManager === 'npm' ? 'npm run' : packageManager;
+  console.log(`  ${runner} lint        # Run ESLint`);
+  console.log(`  ${runner} lint:style  # Run Stylelint`);
+  console.log(`  ${runner} format      # Format files with Prettier`);
 }
 
 main().catch(err => {

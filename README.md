@@ -1,5 +1,10 @@
 # create-mark-next-project
 
+![npm](https://img.shields.io/npm/v/create-mark-next-project)
+![downloads](https://img.shields.io/npm/dm/create-mark-next-project)
+![node](https://img.shields.io/node/v/create-mark-next-project)
+![license](https://img.shields.io/npm/l/create-mark-next-project)
+
 `create-mark-next-project` 是一个脚手架 CLI，可以通过一条命令生成完整的 Next.js 16 + React 19 应用模板，默认集成 Tailwind CSS、shadcn/ui 风格组件、Zustand、ESLint、Stylelint、Prettier、Commitlint、semantic-release 以及 GitHub Actions 发布/部署流程。
 
 ## 快速开始
@@ -11,6 +16,12 @@ pnpm install
 pnpm dev
 ```
 
+> 如需指定包管理器：
+>
+> ```bash
+> npx create-mark-next-project my-app --use-npm   # 或 --use-yarn / --use-pnpm
+> ```
+
 ### 可选参数
 
 - `-y` / `--yes`：跳过交互式提问，直接使用默认描述。
@@ -20,6 +31,7 @@ pnpm dev
 - `--ci` / `--no-ci`：是否包含 `.github/workflows` CI 配置（默认包含）。
 - `--preview-tools` / `--no-preview-tools`：是否包含 nginx 预览脚本与相关 npm scripts（默认包含）。
 - `--verify` / `--no-verify`：生成完成后是否运行基础校验（默认开启）。
+- `--use-pnpm` / `--use-npm` / `--use-yarn`：指定包管理器（默认自动检测，优先 pnpm → yarn → npm）。
 - 如果保留 semantic-release 相关文件，GitHub Actions `release` 工作流需要仓库 Secret `RELEASE_GITHUB_TOKEN`（具备 `repo` 权限的 PAT）；也可以自行改成使用内置的 `GITHUB_TOKEN`。
 
 ## 模板特性
@@ -56,6 +68,13 @@ pnpm publish --access public
 2. `templates/base` 中的依赖与配置已验证可用
 3. README 与 LICENSE 信息准确
 4. 如果使用预置的 GitHub Actions 进行发布，请在目标仓库设置 `RELEASE_GITHUB_TOKEN`（具备 `repo` 权限的 PAT），否则 release workflow 会失败
+5. 运行脚手架需要 Node >= 18.18.0；若选择非 pnpm 的包管理器，脚手架会自动移除 `pnpm-lock.yaml`，请用对应包管理器安装依赖
+
+## 常见问题
+
+- **提示 Node 版本不符**：请升级到 18.18.0 或更高。
+- **未安装 pnpm**：使用 `--use-npm` 或 `--use-yarn`，或先安装 pnpm。
+- **发布失败（semantic-release）**：确认仓库配置了 `RELEASE_GITHUB_TOKEN`（PAT，含 `repo` 权限）；或在创建项目时使用 `--no-semantic-release` 跳过。
 
 ## License
 
