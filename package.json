@@ -1,6 +1,6 @@
 {
   "name": "create-mark-next-project",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Create a Next.js 16 + React 19 project with Tailwind, linting, CI, preview tools, and semantic-release out of the box.",
   "bin": {
     "create-mark-next-project": "bin/create-mark-next-project.js"
